@@ -38,7 +38,7 @@ def fit_ease(interactions, regularization):
     return np.ascontiguousarray(precision)
 
 
-def recommend(interactions, users, weights):
+def recommend(interactions, users, weights, *, top_k=TOP_K):
     available = np.asarray(interactions.getnnz(axis=0)) > 0
     item_ids = np.arange(weights.shape[0])
     for start in range(0, len(users), 128):
@@ -50,11 +50,11 @@ def recommend(interactions, users, weights):
             seen = histories.indices[histories.indptr[index]:histories.indptr[index + 1]]
             row = scores[index]
             row[seen] = -np.inf
-            cutoff = np.partition(row, -TOP_K)[-TOP_K]
+            cutoff = np.partition(row, -top_k)[-top_k]
             if not np.isfinite(cutoff):
-                raise ValueError(f"Fewer than {TOP_K} eligible items for user {user}.")
+                raise ValueError(f"Fewer than {top_k} eligible items for user {user}.")
             above = item_ids[row > cutoff]
-            tied = item_ids[row == cutoff][:TOP_K - len(above)]
+            tied = item_ids[row == cutoff][:top_k - len(above)]
             candidates = np.concatenate((above, tied))
             yield user, candidates[np.lexsort((candidates, -row[candidates]))]
 

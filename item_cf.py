@@ -29,7 +29,7 @@ def limit_neighbors(similarity, neighbors):
     similarity.eliminate_zeros()
 
 
-def recommend(pairs, users, item_count, user_count, *, neighbors=0, shrinkage=0):
+def recommend(pairs, users, item_count, user_count, *, neighbors=0, shrinkage=0, top_k=TOP_K):
     interactions = csr_matrix(
         (np.ones(len(pairs), dtype=np.float32), (pairs[:, 0], pairs[:, 1])),
         shape=(user_count, item_count),
@@ -59,24 +59,24 @@ def recommend(pairs, users, item_count, user_count, *, neighbors=0, shrinkage=0)
             row = scores[index]
             eligible = ~np.isin(row.indices, seen_indices)
             candidates, values = row.indices[eligible], row.data[eligible]
-            if len(values) > TOP_K:
-                cutoff = np.partition(values, -TOP_K)[-TOP_K]
+            if len(values) > top_k:
+                cutoff = np.partition(values, -top_k)[-top_k]
                 above = np.flatnonzero(values > cutoff)
                 tied = np.flatnonzero(values == cutoff)
-                tied = tied[np.argsort(candidates[tied])[:TOP_K - len(above)]]
+                tied = tied[np.argsort(candidates[tied])[:top_k - len(above)]]
                 finalists = np.concatenate((above, tied))
                 candidates, values = candidates[finalists], values[finalists]
-            order = np.lexsort((candidates, -values))[:TOP_K]
+            order = np.lexsort((candidates, -values))[:top_k]
             selected = candidates[order].tolist()
-            if len(selected) < TOP_K:
+            if len(selected) < top_k:
                 seen = set(seen_indices)
                 for item in popularity:
                     if item not in seen and item not in selected:
                         selected.append(int(item))
-                    if len(selected) == TOP_K:
+                    if len(selected) == top_k:
                         break
-            if len(selected) != TOP_K:
-                raise ValueError(f"Fewer than {TOP_K} eligible items for user {user}")
+            if len(selected) != top_k:
+                raise ValueError(f"Fewer than {top_k} eligible items for user {user}")
             yield user, selected
 
 
