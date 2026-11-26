@@ -37,3 +37,15 @@ python3 item_cf.py
 | 아이템 기반 협업 필터링 | 0.033082 |
 
 협업 필터링은 공통 검증셋에서 59,036개 중 1,953개를 맞혔습니다. [Kaggle 제출용 CSV](item_cf_submission.csv)
+
+## 콘텐츠 추천
+
+`data/item_meta.jsonl`을 두고 아래 명령을 실행합니다. 상품명 단독과 상품명·카테고리 결합의 Recall@20 및 메타데이터 결측 통계가 출력됩니다.
+
+```bash
+python3 -m pip install numpy scipy scikit-learn
+python3 popularity.py
+python3 content_model.py
+```
+
+[콘텐츠 추천 보고서 초안](content_report.md)
