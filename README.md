@@ -1,5 +1,9 @@
 # Amazon Top-K Recommendation
 
+## 공식 대회 베이스라인
+
+Kaggle 리더보드의 `LightGCN (Baseline)` 점수는 **Recall@20 0.04187 (4.187%)**입니다. 과제 공지에서 베이스라인 통과 배점은 40점이며, 동점 인정 여부는 확인되지 않았습니다. 통과 여부는 Kaggle 제출 점수로 확인합니다. [Kaggle 리더보드](https://www.kaggle.com/competitions/ssu-data-science-amazon-top-k-recommendation/leaderboard)
+
 ## 인기 상품 추천 검증
 
 대회에서 받은 `train.csv`를 `data/train.csv`에 두고 저장소 루트에서 실행합니다. Python 표준 라이브러리만 사용합니다.
