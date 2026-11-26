@@ -76,3 +76,23 @@ python3 item_cf.py --shrinkage 5 --output outputs/item_cf_shrink5_submission.csv
 ```
 
 [감쇠 모델 Kaggle 제출용 CSV](item_cf_shrink5_submission.csv)
+
+## EASE 실험
+
+[EASE 논문](https://arxiv.org/abs/1905.03375)의 선형 모델을 이진 사용자–상품 행렬에 적용했습니다. 정규화한 상품–상품 행렬의 역행렬을 구해 가중치를 계산하고, 사용자가 이미 본 상품은 추천에서 제외했습니다. 모든 설정은 시드 42의 공통 검증 분할에서 비교했습니다.
+
+| 모델 | 정규화 λ | 검증 적중 수 | 공통 검증 Recall@20 |
+|---|---:|---:|---:|
+| 아이템 CF 감쇠 | — | 2,726 | 0.046175 |
+| EASE | 50 | 2,469 | 0.041822 |
+| EASE | 200 | 2,766 | 0.046853 |
+| EASE | 500 | 2,839 | **0.048089** |
+
+검증에서 최고였던 λ=500으로 전체 학습 데이터에 다시 적합해 제출용 CSV를 생성했습니다. 이 실험은 NumPy와 SciPy를 사용하며, 상품 수에 비례해 제곱 크기의 밀집 행렬을 할당합니다.
+
+```bash
+python3 popularity.py
+OPENBLAS_NUM_THREADS=2 python3 ease.py
+```
+
+[EASE Kaggle 제출용 CSV](ease_submission.csv)
