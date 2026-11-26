@@ -19,7 +19,17 @@ def read_pairs(path):
         )
 
 
-def recommend(pairs, users, item_count, user_count):
+def limit_neighbors(similarity, neighbors):
+    for start, stop in zip(similarity.indptr[:-1], similarity.indptr[1:]):
+        if stop - start > neighbors:
+            values = similarity.data[start:stop]
+            indices = similarity.indices[start:stop]
+            order = np.lexsort((indices, -values))
+            values[order[neighbors:]] = 0
+    similarity.eliminate_zeros()
+
+
+def recommend(pairs, users, item_count, user_count, *, neighbors=0, shrinkage=0):
     interactions = csr_matrix(
         (np.ones(len(pairs), dtype=np.float32), (pairs[:, 0], pairs[:, 1])),
         shape=(user_count, item_count),
@@ -31,22 +41,35 @@ def recommend(pairs, users, item_count, user_count):
     popularity = popularity[np.lexsort((popularity, -item_frequency[popularity]))]
     scale = np.sqrt(np.maximum(item_frequency, 1))
     similarity = (interactions.T @ interactions).tocoo()
+    if shrinkage:
+        co_reviews = similarity.data
+        similarity.data = co_reviews * (co_reviews / (co_reviews + shrinkage))
     similarity.data /= scale[similarity.row] * scale[similarity.col]
     similarity = similarity.tocsr()
     similarity.setdiag(0)
     similarity.eliminate_zeros()
+    if neighbors:
+        limit_neighbors(similarity, neighbors)
 
     for start in range(0, len(users), BATCH_SIZE):
         batch_users = users[start : start + BATCH_SIZE]
         scores = (interactions[batch_users] @ similarity).tocsr()
         for index, user in enumerate(batch_users):
-            seen = set(interactions[user].indices)
+            seen_indices = interactions.indices[interactions.indptr[user]:interactions.indptr[user + 1]]
             row = scores[index]
-            eligible = np.array([item not in seen for item in row.indices], dtype=bool)
+            eligible = ~np.isin(row.indices, seen_indices)
             candidates, values = row.indices[eligible], row.data[eligible]
+            if len(values) > TOP_K:
+                cutoff = np.partition(values, -TOP_K)[-TOP_K]
+                above = np.flatnonzero(values > cutoff)
+                tied = np.flatnonzero(values == cutoff)
+                tied = tied[np.argsort(candidates[tied])[:TOP_K - len(above)]]
+                finalists = np.concatenate((above, tied))
+                candidates, values = candidates[finalists], values[finalists]
             order = np.lexsort((candidates, -values))[:TOP_K]
             selected = candidates[order].tolist()
             if len(selected) < TOP_K:
+                seen = set(seen_indices)
                 for item in popularity:
                     if item not in seen and item not in selected:
                         selected.append(int(item))
@@ -62,7 +85,13 @@ def main():
     parser.add_argument("--data", type=Path, default=Path("data"))
     parser.add_argument("--validation", type=Path, default=Path("outputs"))
     parser.add_argument("--output", type=Path, default=Path("outputs/item_cf_submission.csv"))
+    parser.add_argument("--neighbors", type=int, default=0, help="Neighbors per item (0 keeps all).")
+    parser.add_argument("--shrinkage", type=float, default=0, help="Co-review shrinkage constant.")
+    parser.add_argument("--validation-only", action="store_true")
     args = parser.parse_args()
+    if args.neighbors < 0 or not np.isfinite(args.shrinkage) or args.shrinkage < 0:
+        parser.error("Neighbors and shrinkage must be finite and nonnegative.")
+    settings = dict(neighbors=args.neighbors, shrinkage=args.shrinkage)
 
     full = read_pairs(args.data / "train.csv")
     training = read_pairs(args.validation / "validation_train.csv")
@@ -83,16 +112,19 @@ def main():
         truth.setdefault(user, set()).add(item)
     hits = sum(
         len(truth[user].intersection(items))
-        for user, items in recommend(training, np.array(sorted(truth)), item_count, user_count)
+        for user, items in recommend(training, np.array(sorted(truth)), item_count, user_count, **settings)
     )
     denominator = sum(min(len(items), TOP_K) for items in truth.values())
     print(f"Validation Recall@20: {hits}/{denominator} = {hits / denominator:.9f}")
+
+    if args.validation_only:
+        return
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="") as output:
         writer = csv.writer(output)
         writer.writerow(["user_id", "item_id"])
-        for user, items in recommend(full, sample_users, item_count, user_count):
+        for user, items in recommend(full, sample_users, item_count, user_count, **settings):
             writer.writerow([user, " ".join(map(str, items))])
 
 
