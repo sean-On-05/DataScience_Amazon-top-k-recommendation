@@ -217,3 +217,24 @@ OPENBLAS_NUM_THREADS=2 python3 asymmetric_ensemble.py
 ```bash
 OPENBLAS_NUM_THREADS=2 python3 analyze_ensemble.py
 ```
+
+## 후보 재정렬
+
+EASE, 감쇠 아이템 CF, 상품명 유사도 및 선형 Turbo-CF의 상위 후보를 합친 뒤, 히스토그램 기반 그래디언트 부스팅으로 사용자별 최종 20개를 선택합니다. 사용한 22개 특징에는 모델 순위, 상품 인기도, 이력 길이, 제목 유사도, 공동 리뷰 수, 판매처, 세부 카테고리, 검증 학습 이력의 평점과 리뷰 시점이 포함됩니다.
+
+| 방식 | 로컬 Recall@20 | 적중 수 |
+|---|---:|---:|
+| 기존 3모델 순위 결합 | 0.055544 | 823 |
+| 순위·인기도·이력 길이만으로 재정렬 | 0.056624 | 839 |
+| 22개 특징으로 재정렬 | 0.062563 | 927 |
+| 22개 특징 재정렬 75% + 기존 순위 25% | **0.062631** | 928 |
+
+위 결과는 같은 공통 검증 분할에서 재정렬 학습 사용자 27,032명과 평가 사용자 9,011명을 분리해 집계했습니다. 혼합 방식은 재정렬 단독보다 정답 1개를 더 맞혔으며, 별도 상호작용 분할에서는 아직 비교하지 않았습니다. 두 방식의 Kaggle 점수는 아직 없습니다.
+
+```bash
+python3 -m pip install numpy scipy scikit-learn
+python3 popularity.py
+OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 wide_rerank.py
+```
+
+`data/train.csv`와 `data/item_meta.jsonl`이 필요합니다. ZIP으로 받았다면 마지막 명령에 `--meta data/item_meta.zip`을 추가합니다. 이 스크립트는 로컬 평가 결과를 출력합니다.
