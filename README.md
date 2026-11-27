@@ -238,3 +238,17 @@ OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 wide_rerank.py
 ```
 
 `data/train.csv`와 `data/item_meta.jsonl`이 필요합니다. ZIP으로 받았다면 마지막 명령에 `--meta data/item_meta.zip`을 추가합니다. 이 스크립트는 로컬 평가 결과를 출력합니다.
+
+### Kaggle 제출 파일
+
+기존 EASE + 감쇠 CF 결합의 Kaggle Recall@20은 **0.05351**입니다.
+
+재정렬 제출본은 공통 분할에서 생성한 전체 사용자의 후보와 정답으로 재정렬 모델을 학습합니다. 제출 후보와 특징은 전체 `train.csv`로 다시 생성합니다. 최종 선택은 재정렬 순위 75%와 기존 3모델 순위 25%를 역순위 점수로 결합합니다.
+
+```bash
+OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 wide_rerank.py --submission outputs/wide_rerank_submission.csv
+```
+
+기본 경로는 `data/train.csv`, `data/test.csv`, `data/sample_submission.csv`, `data/item_meta.jsonl`입니다. 공통 분할은 위의 `popularity.py` 명령으로 먼저 생성합니다.
+
+[재정렬 Kaggle 제출용 CSV](wide_rerank_submission.csv)

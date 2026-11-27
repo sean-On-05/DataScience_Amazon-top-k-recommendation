@@ -92,16 +92,11 @@ def graph_rows(interactions, users):
             yield best_indices(scores, 100)
 
 
-def generate(full_path, validation, metadata_path):
-    split_path = validation / "validation_train.csv"
+def candidate_features(full_path, split_path, metadata_path, users):
     shape = tuple(int(n) + 1 for n in read_pairs(full_path).max(axis=0))
     fit = interactions_from(split_path, shape)
     co = (fit.T @ fit).tocsr()
     frequency = fit.getnnz(axis=0)
-    truth = {}
-    for user, item in read_pairs(validation / "validation_truth.csv"):
-        truth.setdefault(user, set()).add(item)
-    users = sorted(truth)
     ratings = {}
     # Keep attributes only for interactions visible in the validation training split.
     retained = set(map(tuple, read_pairs(split_path)))
@@ -114,10 +109,6 @@ def generate(full_path, validation, metadata_path):
     text, neighbors, sims, stores, leaves = catalog_features(shape[1], metadata_path)
     print("Title, store and category features ready.", flush=True)
 
-    feature_blocks = []
-    label_blocks = []
-    item_blocks = []
-    offsets = [0]
     for (user, ease, cf), turbo in zip(
         paired_candidates(split_path, users, shape), graph_rows(fit, users), strict=True
     ):
@@ -148,7 +139,22 @@ def generate(full_path, validation, metadata_path):
             review[nearest, 0], np.log1p(age[nearest]),
             (joint @ review[:, 0]) / np.maximum(joint.sum(axis=1), 1),
         )
-        feature_blocks.append(np.column_stack(blocks).astype(np.float32))
+        yield user, items, np.column_stack(blocks).astype(np.float32)
+
+
+def generate(full_path, validation, metadata_path):
+    truth = {}
+    for user, item in read_pairs(validation / "validation_truth.csv"):
+        truth.setdefault(user, set()).add(item)
+    users = sorted(truth)
+    feature_blocks = []
+    label_blocks = []
+    item_blocks = []
+    offsets = [0]
+    for user, items, features in candidate_features(
+        full_path, validation / "validation_train.csv", metadata_path, users
+    ):
+        feature_blocks.append(features)
         label_blocks.append(np.isin(items, list(truth[user])))
         item_blocks.append(items.astype(np.int32))
         offsets.append(offsets[-1] + len(items))
@@ -179,11 +185,7 @@ def evaluate(features, labels, items, offsets, denominators):
           f"train positives={len(positive_rows)}, denominator={total}", flush=True)
     scores = {"RRF 3": x[:, 4].astype(np.float64), "RRF 4": x[:, 5].astype(np.float64)}
     for name, columns in (("ranks + popularity", np.r_[0:8]), ("all features", np.arange(len(FIELDS)))):
-        model = HistGradientBoostingClassifier(
-            max_iter=135, max_leaf_nodes=23, learning_rate=0.08, min_samples_leaf=100,
-            l2_regularization=2, early_stopping=False, random_state=2026,
-        )
-        model.fit(features[selected][:, columns], labels[selected])
+        model = fit_reranker(features[selected][:, columns], labels[selected])
         scores[name] = model.predict_proba(x[:, columns])[:, 1]
 
     hits = dict.fromkeys(scores, 0)
@@ -214,18 +216,76 @@ def evaluate(features, labels, items, offsets, denominators):
         print(f"{name}: {count}/{total} = {count / total:.9f}")
 
 
+def fit_reranker(features, labels):
+    model = HistGradientBoostingClassifier(
+        max_iter=135, max_leaf_nodes=23, learning_rate=0.08, min_samples_leaf=100,
+        l2_regularization=2, early_stopping=False, random_state=2026,
+    )
+    return model.fit(features, labels)
+
+
+def train_submission_model(features, labels):
+    rng = np.random.default_rng(2026)
+    positives = np.flatnonzero(labels)
+    negatives = np.flatnonzero(~labels)
+    negatives = rng.choice(negatives, size=min(len(negatives), 650000), replace=False)
+    rows = np.concatenate((positives, negatives))
+    return fit_reranker(features[rows], labels[rows])
+
+
+def write_submission(args, model):
+    with args.sample.open(newline="") as source:
+        users = [int(row["user_id"]) for row in csv.DictReader(source)]
+    with args.test.open(newline="") as source:
+        test = [int(row["user_id"]) for row in csv.DictReader(source)]
+    if len(set(users)) != len(users) or sorted(users) != sorted(test):
+        raise ValueError("Sample submission and test user lists differ.")
+
+    args.submission.parent.mkdir(parents=True, exist_ok=True)
+    temporary = args.submission.with_suffix(".tmp")
+    with temporary.open("w", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(["user_id", "item_id"])
+        rows = candidate_features(args.train, args.train, args.meta, users)
+        for index, (user, items, features) in enumerate(rows, 1):
+            probabilities = model.predict_proba(features)[:, 1]
+            blend = np.zeros(len(items))
+            for weight, scores in ((0.75, probabilities), (0.25, features[:, 4])):
+                order = np.lexsort((items, -scores))
+                blend[order] += weight / (21 + np.arange(len(order)))
+            top = items[np.lexsort((items, -blend))[:20]]
+            writer.writerow([user, " ".join(map(str, top))])
+            if index % 8000 == 0:
+                print(f"Ranked {index} submission users.", flush=True)
+    temporary.replace(args.submission)
+    print(f"Wrote {args.submission}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--train", type=Path, default=Path("data/train.csv"))
     parser.add_argument("--meta", type=Path, default=Path("data/item_meta.jsonl"))
     parser.add_argument("--validation", type=Path, default=Path("outputs"))
     parser.add_argument("--features", type=Path, help="Reuse an existing local feature cache.")
+    parser.add_argument("--submission", type=Path, help="Write full-training Kaggle predictions.")
+    parser.add_argument("--test", type=Path, default=Path("data/test.csv"))
+    parser.add_argument("--sample", type=Path, default=Path("data/sample_submission.csv"))
     args = parser.parse_args()
     if args.features:
         with np.load(args.features) as cache:
-            evaluate(*(cache[name] for name in ("features", "labels", "items", "offsets", "denominators")))
+            if args.submission:
+                model = train_submission_model(cache["features"], cache["labels"])
+            else:
+                evaluate(*(cache[name] for name in ("features", "labels", "items", "offsets", "denominators")))
     else:
-        evaluate(*generate(args.train, args.validation, args.meta))
+        data = generate(args.train, args.validation, args.meta)
+        if args.submission:
+            model = train_submission_model(*data[:2])
+            del data
+        else:
+            evaluate(*data)
+    if args.submission:
+        write_submission(args, model)
 
 
 if __name__ == "__main__":
