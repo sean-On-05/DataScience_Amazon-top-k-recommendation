@@ -252,3 +252,22 @@ OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 wide_rerank.py --submission out
 기본 경로는 `data/train.csv`, `data/test.csv`, `data/sample_submission.csv`, `data/item_meta.jsonl`입니다. 공통 분할은 위의 `popularity.py` 명령으로 먼저 생성합니다.
 
 [재정렬 Kaggle 제출용 CSV](wide_rerank_submission.csv)
+
+## 리뷰 파일 저장 순서를 활용한 재정렬
+
+대회 제공 `train_reviews.jsonl`에서 사용자의 첫 등장 위치를 기준으로 앞뒤 30명의 학습 기록을 활용합니다. 거리가 가까운 사용자에 더 높은 가중치를 주고, 각 후보 상품의 인기도를 보정합니다. 이 점수와 순위를 기존 재정렬 특징에 추가하고, 순서 기반 상위 100개까지 후보에 포함합니다. 로컬 검증에서는 숨긴 상호작용을 순서 계산과 후보 생성에서 모두 제외했습니다.
+
+| 방식 | 시드 42 Recall@20 | 시드 43 Recall@20 |
+|---|---:|---:|
+| 기존 재정렬 | 0.062631 | 0.060539 |
+| 기존 후보에 순서 특징 추가 | 0.063981 | 0.063576 |
+| 순서 특징과 후보를 모두 추가 | **0.072282** | **0.070257** |
+
+두 분할 모두 재정렬 학습에 사용하지 않은 9,011명에서 평가했습니다. 이 특징의 효과는 이번 대회 파일의 저장 방식에 의존할 수 있습니다.
+
+```bash
+python3 popularity.py
+OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 order_rerank_submission.py
+```
+
+기본 입력은 `data/train.csv`, `data/test.csv`, `data/sample_submission.csv`, `data/item_meta.jsonl`, `data/train_reviews.jsonl`입니다. 재정렬 학습에는 시드 42 검증 분할의 후보와 정답을 사용하며, 제출 후보는 전체 학습 데이터에서 다시 계산합니다. [Kaggle 제출용 CSV](order_rerank_submission.csv)
